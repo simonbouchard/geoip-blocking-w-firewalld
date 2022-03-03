@@ -1,0 +1,154 @@
+#!/bin/bash
+
+#|--------------------------------------------------------------------------
+# GeoIP Firewall script for firewalld
+#
+# Written by Simon Bouchard <sbouchard@layer7.email>
+# Refactored and inspired from https://gist.github.com/Pandry/21fc0e30abbfd0579ec69c491b99a446
+#
+# Created: Mars 2022
+#
+# You may use, modify, and redistribute this script freely
+#|--------------------------------------------------------------------------
+
+
+#|--------------------------------------------------------------------------
+#| Colors
+#|--------------------------------------------------------------------------
+
+RED='\033[0;91m'
+GREEN='\033[0;92m'
+CYAN='\033[0;96m'
+YELLOW='\033[0;93m'
+PURPLE='\033[0;95m'
+BLUE='\033[0;94m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+#|--------------------------------------------------------------------------
+#| Global variables
+#|--------------------------------------------------------------------------
+
+ZONES="ru by" # Retrieve the zone's name here https://www.ipdeny.com/ipblocks/
+BLACKLIST="geoip-blacklist"
+TMPDIR="/tmp/geoip"
+SCRIPT="$0"
+
+if [ $(which yum) ]; then
+    echo -e "[${PURPLE}i${NC}] Detected operating system as RHEL/CentOS"
+    echo -e "[${PURPLE}i${NC}] Installing firewalld on the system"
+    yum -y install firewalld > /dev/null 2> /dev/null
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] firewalld is installed"
+        systemctl enable --now firewalld  > /dev/null 2> /dev/null
+    else
+        echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
+        exit 1
+    fi
+elif [ $(which apt) ]; then
+    echo -e "[${PURPLE}i${NC}] Detected operating system as Debian/Ubuntu"
+    echo -e "[${PURPLE}i${NC}] Installing firewalld on the system"
+    apt -y install firewalld > /dev/null 2> /dev/null
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] firewalld is installed"
+        systemctl enable --now firewalld > /dev/null 2> /dev/null
+    else
+        echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
+        exit 1
+    fi
+elif [ $(which apk) ]; then
+    echo -e "[${RED}✗${NC}] Alpine Linux is not supported yet. Aborting!"
+	exit 1
+else
+    echo -e "[${RED}✗${NC}] Couldn't determine the current OS. Aborting!"
+	exit 1
+fi
+
+echo -e "[${PURPLE}i${NC}] Checking for existing Ipsets for $BLACKLIST"
+firewall-cmd --get-ipsets | grep "${BLACKLIST}-ip4" > /dev/null 2> /dev/null
+firewall-cmd --get-ipsets | grep "${BLACKLIST}-ip6" > /dev/null 2> /dev/null
+
+if [[ $? -ne 0 ]];then
+    echo -e "[${PURPLE}i${NC}] Creating new Ipsets for $BLACKLIST"
+    firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip4" --type=hash:net --option=family=inet --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+    firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip6" --type=hash:net --option=family=inet6 --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] Ipsets for $BLACKLIST successfully created"
+    else
+        echo -e "[${RED}✗${NC}] Couldn't create the blacklist $BLACKLIST. Aborting!"
+        exit 1
+    fi
+fi
+
+# Create the tmp directory
+mkdir -p $TMPDIR
+
+if [[ $? -eq 0 ]];then
+
+    echo -e "[${PURPLE}i${NC}] Downloading the requested zones"
+    echo ""
+    for z in $ZONES; do
+        echo -e "[${PURPLE}i${NC}] Downloading zone ${YELLOW}$z${NC}"
+        curl -L -o $TMPDIR/$z-ip4.zone https://www.ipdeny.com/ipblocks/data/countries/$z.zone > /dev/null 2> /dev/null
+        curl -L -o $TMPDIR/$z-ip6.zone https://www.ipdeny.com/ipv6/ipaddresses/blocks/$z.zone > /dev/null 2> /dev/null
+        if [[ $? -eq 0 ]];then
+            echo -e "[${GREEN}✓${NC}] OK"
+        else
+            echo -e "[${RED}✗${NC}] Failed"
+        fi
+        echo ""
+    done
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] All zones were successfully downloaded"
+        echo ""
+    else
+        echo -e "[${RED}✗${NC}] Failed to download all the requested zones. Aborting!"
+        exit 1
+    fi
+else 
+    echo -e "[${RED}✗${NC}] Couldn't create the $TMPDIR directory. Aborting!"
+    exit 1
+fi
+
+# Load the zone(s) into the blacklist
+for f in $TMPDIR/*-ip4.zone; do
+    echo -e "[${PURPLE}i${NC}] Adding ipv4 target ranges from ${YELLOW}$f${NC}"
+    firewall-cmd --permanent --ipset="${BLACKLIST}-ip4" --add-entries-from-file=$f > /dev/null
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] OK"
+    else
+        echo -e "[${RED}✗${NC}] Failed"
+    fi
+    echo ""
+done
+
+for f in $TMPDIR/*-ip6.zone; do
+    echo -e "[${PURPLE}i${NC}] Adding ipv6 target ranges from ${YELLOW}$f${NC}"
+    firewall-cmd --permanent --ipset="${BLACKLIST}-ip6" --add-entries-from-file=$f > /dev/null
+    if [[ $? -eq 0 ]];then
+        echo -e "[${GREEN}✓${NC}] OK"
+    else
+        echo -e "[${RED}✗${NC}] Failed"
+    fi
+    echo ""
+done
+
+# Initialize the firewall
+echo -e "[${PURPLE}i${NC}] Initializing firewalld"
+firewall-cmd --permanent --zone=drop --add-source="ipset:${BLACKLIST}-ip4" > /dev/null
+firewall-cmd --permanent --zone=drop --add-source="ipset:${BLACKLIST}-ip6" > /dev/null
+
+# Reload the firewall
+echo -e "[${PURPLE}i${NC}] Reloading firewalld"
+firewall-cmd --reload > /dev/null
+
+echo -e "[${PURPLE}i${NC}] Cleaning up..."
+
+cd ~
+rm $SCRIPT
+rm -rf $TMPDIR
+
+echo ""
+
+echo -e "[${PURPLE}i${NC}] Blocking approx. ${YELLOW}$(ipset list ${BLACKLIST}-ip4 | wc -l)${NC} ipv4 target ranges and approx. ${YELLOW}$(ipset list ${BLACKLIST}-ip6 | wc -l)${NC} ipv6 target ranges."
+echo -e "[${GREEN}✓${NC}] Firewall successfully configured!"
