@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #|--------------------------------------------------------------------------
-# GeoIP Firewall script for firewalld
+# Firewall GeoIP script for firewalld
 #
 # Written by Simon Bouchard <sbouchard@layer7.email>
 # Refactored and inspired from https://gist.github.com/Pandry/21fc0e30abbfd0579ec69c491b99a446
@@ -11,6 +11,13 @@
 # You may use, modify, and redistribute this script freely
 #|--------------------------------------------------------------------------
 
+#|--------------------------------------------------------------------------
+#| Options
+#|--------------------------------------------------------------------------
+
+ZONES="ru by" # Retrieve the zone's name here https://www.ipdeny.com/ipblocks/
+BLACKLIST="geoip-blacklist"
+TMPDIR="/tmp/geoip"
 
 #|--------------------------------------------------------------------------
 #| Colors
@@ -29,63 +36,98 @@ NC='\033[0m'
 #| Global variables
 #|--------------------------------------------------------------------------
 
-ZONES="ru by" # Retrieve the zone's name here https://www.ipdeny.com/ipblocks/
-BLACKLIST="geoip-blacklist"
-TMPDIR="/tmp/geoip"
+FIREWALLD="$(which firewalld)"
+YUM="$(which yum)"
+APT="$(which apt)"
+APK="$(which apk)"
 SCRIPT="$0"
 
-if [ $(which yum) ]; then
+#|--------------------------------------------------------------------------
+#| Main
+#|--------------------------------------------------------------------------
+
+if [[ -x "$YUM" ]]; then
+    OS="RHEL"
     echo -e "[${PURPLE}i${NC}] Detected operating system as RHEL/CentOS"
-    echo -e "[${PURPLE}i${NC}] Installing firewalld on the system"
-    yum -y install firewalld > /dev/null 2> /dev/null
-    if [[ $? -eq 0 ]];then
-        echo -e "[${GREEN}✓${NC}] firewalld is installed"
-        systemctl enable --now firewalld  > /dev/null 2> /dev/null
-    else
-        echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
-        exit 1
-    fi
-elif [ $(which apt) ]; then
+elif [[ -x "$APT" ]]; then
+    OS="DEBIAN"
     echo -e "[${PURPLE}i${NC}] Detected operating system as Debian/Ubuntu"
-    echo -e "[${PURPLE}i${NC}] Installing firewalld on the system"
-    apt -y install firewalld > /dev/null 2> /dev/null
-    if [[ $? -eq 0 ]];then
-        echo -e "[${GREEN}✓${NC}] firewalld is installed"
-        systemctl enable --now firewalld > /dev/null 2> /dev/null
-    else
-        echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
-        exit 1
-    fi
-elif [ $(which apk) ]; then
-    echo -e "[${RED}✗${NC}] Alpine Linux is not supported yet. Aborting!"
-	exit 1
 else
     echo -e "[${RED}✗${NC}] Couldn't determine the current OS. Aborting!"
 	exit 1
 fi
 
-echo -e "[${PURPLE}i${NC}] Checking for existing Ipsets for $BLACKLIST"
-firewall-cmd --get-ipsets | grep "${BLACKLIST}-ip4" > /dev/null 2> /dev/null
-firewall-cmd --get-ipsets | grep "${BLACKLIST}-ip6" > /dev/null 2> /dev/null
-
-if [[ $? -ne 0 ]];then
-    echo -e "[${PURPLE}i${NC}] Creating new Ipsets for $BLACKLIST"
-    firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip4" --type=hash:net --option=family=inet --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
-    firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip6" --type=hash:net --option=family=inet6 --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
-    if [[ $? -eq 0 ]];then
-        echo -e "[${GREEN}✓${NC}] Ipsets for $BLACKLIST successfully created"
-    else
-        echo -e "[${RED}✗${NC}] Couldn't create the blacklist $BLACKLIST. Aborting!"
-        exit 1
-    fi
+echo -e "[${PURPLE}i${NC}] Verifying if firewalld is available"
+if ! [[ -x "$FIREWALLD" ]]; then
+    echo -e "[${PURPLE}i${NC}] firewalld not available, installing"
+    if [[ "$OS" == "RHEL" ]]; then
+        yum -y install firewalld > /dev/null 2> /dev/null
+        if [[ $? -eq 0 ]]; then
+            echo -e "[${GREEN}✓${NC}] firewalld is installed"
+            systemctl enable --now firewalld > /dev/null 2> /dev/null
+        else
+            echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
+            exit 1
+        fi  
+    elif [[ "$OS" == "DEBIAN" ]]; then
+        apt -y install firewalld > /dev/null 2> /dev/null
+        if [[ $? -eq 0 ]]; then
+            echo -e "[${GREEN}✓${NC}] firewalld is installed"
+            systemctl enable --now firewalld > /dev/null 2> /dev/null
+        else
+            echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
+            exit 1
+        fi
+    fi    
+else
+echo -e "[${GREEN}✓${NC}] firewalld is installed"
 fi
+
+echo ""
+
+echo -e "[${PURPLE}i${NC}] Checking for existing ipset for ${BLACKLIST}-ip4"
+if firewall-cmd --permanent --get-ipsets | grep -q "${BLACKLIST}-ip4"; then
+    echo -e "[${PURPLE}i${NC}] Deleting ipset ${BLACKLIST}-ip4"
+    firewall-cmd --permanent --zone=drop --remove-source=ipset:"${BLACKLIST}-ip4" &> /dev/null
+    firewall-cmd --reload &> /dev/null
+    firewall-cmd --permanent --delete-ipset="${BLACKLIST}-ip4" &> /dev/null
+fi
+
+echo -e "[${PURPLE}i${NC}] Creating new ipset for ${BLACKLIST}-ip4"
+firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip4" --type=hash:net --option=family=inet --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+if [[ $? -eq 0 ]];then
+    echo -e "[${GREEN}✓${NC}] ipset for ${BLACKLIST}-ip4 successfully created"
+else
+    echo -e "[${RED}✗${NC}] Couldn't create the blacklist ${BLACKLIST}-ip4. Aborting!"
+    exit 1
+fi
+
+echo ""
+
+echo -e "[${PURPLE}i${NC}] Checking for existing ipset for ${BLACKLIST}-ip6"
+if firewall-cmd --permanent --get-ipsets | grep -q "${BLACKLIST}-ip6"; then
+    echo -e "[${PURPLE}i${NC}] Deleting ipset ${BLACKLIST}-ip6"
+    firewall-cmd --permanent --zone=drop --remove-source=ipset:"${BLACKLIST}-ip6" &> /dev/null
+    firewall-cmd --reload &> /dev/null
+    firewall-cmd --permanent --delete-ipset="${BLACKLIST}-ip6" &> /dev/null 
+fi
+
+echo -e "[${PURPLE}i${NC}] Creating new ipset for ${BLACKLIST}-ip6"
+firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip6" --type=hash:net --option=family=inet6 --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+if [[ $? -eq 0 ]];then
+    echo -e "[${GREEN}✓${NC}] ipset for ${BLACKLIST}-ip6 successfully created"
+else
+    echo -e "[${RED}✗${NC}] Couldn't create the blacklist ${BLACKLIST}-ip6. Aborting!"
+    exit 1
+fi
+
+echo ""
 
 # Create the tmp directory
 mkdir -p $TMPDIR
 
 if [[ $? -eq 0 ]];then
-
-    echo -e "[${PURPLE}i${NC}] Downloading the requested zones"
+    echo -e "[${PURPLE}i${NC}] Retrieving the requested zones to be blacklisted"
     echo ""
     for z in $ZONES; do
         echo -e "[${PURPLE}i${NC}] Downloading zone ${YELLOW}$z${NC}"
@@ -144,8 +186,6 @@ firewall-cmd --reload > /dev/null
 
 echo -e "[${PURPLE}i${NC}] Cleaning up..."
 
-cd ~
-rm $SCRIPT
 rm -rf $TMPDIR
 
 echo ""
