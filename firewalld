@@ -54,7 +54,7 @@ elif [[ -x "$APT" ]]; then
     echo -e "[${PURPLE}i${NC}] Detected operating system as Debian/Ubuntu"
 else
     echo -e "[${RED}✗${NC}] Couldn't determine the current OS. Aborting!"
-	exit 1
+    exit 1
 fi
 
 echo -e "[${PURPLE}i${NC}] Verifying if firewalld is available"
@@ -68,7 +68,7 @@ if ! [[ -x "$FIREWALLD" ]]; then
         else
             echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
             exit 1
-        fi  
+        fi
     elif [[ "$OS" == "DEBIAN" ]]; then
         apt -y install firewalld > /dev/null 2> /dev/null
         if [[ $? -eq 0 ]]; then
@@ -78,7 +78,7 @@ if ! [[ -x "$FIREWALLD" ]]; then
             echo -e "[${RED}✗${NC}] Couldn't install firewalld. Aborting!"
             exit 1
         fi
-    fi    
+    fi
 else
 echo -e "[${GREEN}✓${NC}] firewalld is installed"
 fi
@@ -94,7 +94,7 @@ if firewall-cmd --permanent --get-ipsets | grep -q "${BLACKLIST}-ip4"; then
 fi
 
 echo -e "[${PURPLE}i${NC}] Creating new ipset for ${BLACKLIST}-ip4"
-firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip4" --type=hash:net --option=family=inet --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip4" --type=hash:net --option=family=inet --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null
 if [[ $? -eq 0 ]];then
     echo -e "[${GREEN}✓${NC}] ipset for ${BLACKLIST}-ip4 successfully created"
 else
@@ -109,11 +109,11 @@ if firewall-cmd --permanent --get-ipsets | grep -q "${BLACKLIST}-ip6"; then
     echo -e "[${PURPLE}i${NC}] Deleting ipset ${BLACKLIST}-ip6"
     firewall-cmd --permanent --zone=drop --remove-source=ipset:"${BLACKLIST}-ip6" &> /dev/null
     firewall-cmd --reload &> /dev/null
-    firewall-cmd --permanent --delete-ipset="${BLACKLIST}-ip6" &> /dev/null 
+    firewall-cmd --permanent --delete-ipset="${BLACKLIST}-ip6" &> /dev/null
 fi
 
 echo -e "[${PURPLE}i${NC}] Creating new ipset for ${BLACKLIST}-ip6"
-firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip6" --type=hash:net --option=family=inet6 --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null 
+firewall-cmd --permanent --new-ipset="${BLACKLIST}-ip6" --type=hash:net --option=family=inet6 --option=hashsize=4096 --option=maxelem=200000 --zone=drop > /dev/null 2> /dev/null
 if [[ $? -eq 0 ]];then
     echo -e "[${GREEN}✓${NC}] ipset for ${BLACKLIST}-ip6 successfully created"
 else
@@ -131,8 +131,8 @@ if [[ $? -eq 0 ]];then
     echo ""
     for z in $ZONES; do
         echo -e "[${PURPLE}i${NC}] Downloading zone ${YELLOW}$z${NC}"
-        curl -L -o $TMPDIR/$z-ip4.zone https://www.ipdeny.com/ipblocks/data/aggregated/$z-aggregated.zone > /dev/null 2> /dev/null
-        curl -L -o $TMPDIR/$z-ip6.zone https://www.ipdeny.com/ipv6/ipaddresses/aggregated/$z-aggregated.zone > /dev/null 2> /dev/null
+        curl -s -L -o "$TMPDIR/$z-ip4.zone" "https://www.ipdeny.com/ipblocks/data/aggregated/${z,,}-aggregated.zone" > /dev/null 2> /dev/null
+        curl -s -L -o "$TMPDIR/$z-ip6.zone" "https://www.ipdeny.com/ipv6/ipaddresses/aggregated/${z,,}-aggregated.zone" > /dev/null 2> /dev/null
         if [[ $? -eq 0 ]];then
             echo -e "[${GREEN}✓${NC}] OK"
         else
@@ -147,15 +147,15 @@ if [[ $? -eq 0 ]];then
         echo -e "[${RED}✗${NC}] Failed to download all the requested zones. Aborting!"
         exit 1
     fi
-else 
+else
     echo -e "[${RED}✗${NC}] Couldn't create the $TMPDIR directory. Aborting!"
     exit 1
 fi
 
 # Load the zone(s) into the blacklist
-for f in $TMPDIR/*-ip4.zone; do
+for f in "$TMPDIR"/*-ip4.zone; do
     echo -e "[${PURPLE}i${NC}] Adding ipv4 target ranges from ${YELLOW}$f${NC}"
-    firewall-cmd --permanent --ipset="${BLACKLIST}-ip4" --add-entries-from-file=$f > /dev/null
+    firewall-cmd --permanent --ipset="${BLACKLIST}-ip4" --add-entries-from-file="$f" > /dev/null
     if [[ $? -eq 0 ]];then
         echo -e "[${GREEN}✓${NC}] OK"
     else
@@ -164,9 +164,9 @@ for f in $TMPDIR/*-ip4.zone; do
     echo ""
 done
 
-for f in $TMPDIR/*-ip6.zone; do
+for f in "$TMPDIR"/*-ip6.zone; do
     echo -e "[${PURPLE}i${NC}] Adding ipv6 target ranges from ${YELLOW}$f${NC}"
-    firewall-cmd --permanent --ipset="${BLACKLIST}-ip6" --add-entries-from-file=$f > /dev/null
+    firewall-cmd --permanent --ipset="${BLACKLIST}-ip6" --add-entries-from-file="$f" > /dev/null
     if [[ $? -eq 0 ]];then
         echo -e "[${GREEN}✓${NC}] OK"
     else
