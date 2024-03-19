@@ -131,8 +131,8 @@ if [[ $? -eq 0 ]];then
     echo ""
     for z in $ZONES; do
         echo -e "[${PURPLE}i${NC}] Downloading zone ${YELLOW}$z${NC}"
-        curl -L -o $TMPDIR/$z-ip4.zone https://www.ipdeny.com/ipblocks/data/countries/$z.zone > /dev/null 2> /dev/null
-        curl -L -o $TMPDIR/$z-ip6.zone https://www.ipdeny.com/ipv6/ipaddresses/blocks/$z.zone > /dev/null 2> /dev/null
+        curl -L -o $TMPDIR/$z-ip4.zone https://www.ipdeny.com/ipblocks/data/aggregated/$z-aggregated.zone > /dev/null 2> /dev/null
+        curl -L -o $TMPDIR/$z-ip6.zone https://www.ipdeny.com/ipv6/ipaddresses/aggregated/$z-aggregated.zone > /dev/null 2> /dev/null
         if [[ $? -eq 0 ]];then
             echo -e "[${GREEN}✓${NC}] OK"
         else
@@ -190,5 +190,9 @@ rm -rf $TMPDIR
 
 echo ""
 
-echo -e "[${PURPLE}i${NC}] Blocking approx. ${YELLOW}$(ipset list ${BLACKLIST}-ip4 | wc -l)${NC} ipv4 target ranges and approx. ${YELLOW}$(ipset list ${BLACKLIST}-ip6 | wc -l)${NC} ipv6 target ranges."
+IPV4_COUNT=$(firewall-cmd --permanent --ipset=${BLACKLIST}-ip4 --get-entries | wc -l)
+IPV6_COUNT=$(firewall-cmd --permanent --ipset=${BLACKLIST}-ip6 --get-entries | wc -l)
+
+echo -e "[${PURPLE}i${NC}] Blocking approx. ${YELLOW}${IPV4_COUNT}${NC} ipv4 target ranges and approx. ${YELLOW}${IPV6_COUNT}${NC} ipv6 target ranges."
+
 echo -e "[${GREEN}✓${NC}] Firewall successfully configured!"
